@@ -32,13 +32,19 @@ function sanitizeFilename(name) {
   return path.basename(name).replace(/[^a-zA-Z0-9_.-]/g, '_') || 'file';
 }
 
-// Public-facing deployments must set these; refuse to run wide open.
-const AUTH_USER = process.env.APP_USER;
-const AUTH_PASS = process.env.APP_PASS;
-if (!AUTH_USER || !AUTH_PASS) {
-  console.error('APP_USER and APP_PASS env vars must be set -- refusing to start without auth.');
+// Public-facing deployments must set this; refuse to run wide open.
+// Format: "user1:pass1,user2:pass2,..."
+const AUTH_CREDENTIALS = process.env.APP_CREDENTIALS;
+if (!AUTH_CREDENTIALS) {
+  console.error('APP_CREDENTIALS env var must be set (format: user:pass,user2:pass2) -- refusing to start without auth.');
   process.exit(1);
 }
+const AUTH_USERS = new Map(
+  AUTH_CREDENTIALS.split(',').map((pair) => {
+    const sep = pair.indexOf(':');
+    return [pair.slice(0, sep), pair.slice(sep + 1)];
+  })
+);
 
 function timingSafeStringEqual(a, b) {
   const bufA = Buffer.from(a);
@@ -54,7 +60,8 @@ app.use((req, res, next) => {
     const sep = decoded.indexOf(':');
     const user = decoded.slice(0, sep);
     const pass = decoded.slice(sep + 1);
-    if (timingSafeStringEqual(user, AUTH_USER) && timingSafeStringEqual(pass, AUTH_PASS)) {
+    const expectedPass = AUTH_USERS.get(user);
+    if (expectedPass !== undefined && timingSafeStringEqual(pass, expectedPass)) {
       next();
       return;
     }
