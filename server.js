@@ -1,13 +1,15 @@
-// libraw-wasm's worker.js uses browser Worker globals (self.onmessage/postMessage).
-// Plain Node has no global Worker, so polyfill it before libraw-wasm ever runs.
-import Worker from 'web-worker';
-globalThis.Worker = Worker;
-
+// RAW decode is shelled out to the native `dcraw_emu` binary (part of LibRaw).
+// libraw-wasm was tried first but its Emscripten build only knows how to load
+// its .wasm binary via browser fetch()/XMLHttpRequest, neither of which work
+// inside a plain Node worker thread -- decode calls hung forever instead of
+// erroring. dcraw_emu has no such dependency and decodes a 26MP RAW in ~3s
+// even on a t3.small. It must be built from source and on PATH -- see
+// SESSION_HANDOFF.md for the build steps (not an npm package).
 import express from 'express';
 import multer from 'multer';
 import sharp from 'sharp';
 import archiver from 'archiver';
-import LibRaw from 'libraw-wasm';
+import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -60,8 +62,7 @@ app.post('/convert', upload.array('files', 30), async (req, res) => {
   for (const file of files) {
     const baseName = path.parse(file.originalname).name;
     try {
-      const buffer = await fs.readFile(file.path);
-      const outputBuffer = await convertRaw(buffer, { format, quality, resizeWidth, resizeHeight });
+      const outputBuffer = await convertRaw(file.path, { format, quality, resizeWidth, resizeHeight });
 
       let entryName = `${baseName}.${EXT_FOR_FORMAT[format]}`;
       let dupeCount = 1;
@@ -86,34 +87,44 @@ app.post('/convert', upload.array('files', 30), async (req, res) => {
   await archive.finalize();
 });
 
-async function convertRaw(buffer, { format, quality, resizeWidth, resizeHeight }) {
-  const raw = new LibRaw();
-  try {
-    await raw.open(new Uint8Array(buffer), { outputBps: 8, outputColor: 1 });
-    const img = await raw.imageData();
-    if (!img || !img.data || !img.data.length) {
-      throw new Error('Decoder returned no image data');
-    }
+function decodeRawToTiff(inputPath) {
+  return new Promise((resolve, reject) => {
+    execFile(
+      'dcraw_emu',
+      ['-T', '-w', '-q', '3', '-o', '1', '-Z', '-', inputPath],
+      { maxBuffer: 512 * 1024 * 1024, encoding: 'buffer' },
+      (err, stdout, stderr) => {
+        if (err) {
+          if (err.code === 'ENOENT') {
+            reject(new Error('dcraw_emu not found on PATH -- is LibRaw installed?'));
+          } else {
+            reject(new Error(stderr?.toString().trim() || err.message));
+          }
+          return;
+        }
+        resolve(stdout);
+      }
+    );
+  });
+}
 
-    let pipeline = sharp(Buffer.from(img.data.buffer, img.data.byteOffset, img.data.byteLength), {
-      raw: { width: img.width, height: img.height, channels: img.colors }
+async function convertRaw(inputPath, { format, quality, resizeWidth, resizeHeight }) {
+  const tiffBuffer = await decodeRawToTiff(inputPath);
+
+  let pipeline = sharp(tiffBuffer);
+
+  if (resizeWidth || resizeHeight) {
+    pipeline = pipeline.resize(resizeWidth || null, resizeHeight || null, {
+      fit: 'inside',
+      withoutEnlargement: true
     });
-
-    if (resizeWidth || resizeHeight) {
-      pipeline = pipeline.resize(resizeWidth || null, resizeHeight || null, {
-        fit: 'inside',
-        withoutEnlargement: true
-      });
-    }
-
-    if (format === 'jpeg') pipeline = pipeline.jpeg({ quality });
-    else if (format === 'webp') pipeline = pipeline.webp({ quality });
-    else pipeline = pipeline.png();
-
-    return await pipeline.toBuffer();
-  } finally {
-    raw.dispose();
   }
+
+  if (format === 'jpeg') pipeline = pipeline.jpeg({ quality });
+  else if (format === 'webp') pipeline = pipeline.webp({ quality });
+  else pipeline = pipeline.png();
+
+  return await pipeline.toBuffer();
 }
 
 app.listen(PORT, () => {
