@@ -26,10 +26,28 @@
 
     body.jungle-enveloped {
       min-height: 100vh;
-      background:
+      background-color: #dce8d3;
+      background-image:
+        linear-gradient(180deg, rgba(239,247,225,.76) 0%, rgba(206,226,194,.62) 39%, rgba(72,129,75,.20) 100%),
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1600 900' preserveAspectRatio='xMidYMax slice'%3E%3Cpath fill='%2394aa91' fill-opacity='.42' d='M0 510L170 303l91 103 175-232 150 211 116-142 173 208 129-160 161 188 140-165 295 270v317H0z'/%3E%3Cpath fill='%236c9271' fill-opacity='.42' d='M0 612l205-197 115 113 169-197 137 177 124-101 176 147 145-135 145 133 111-83 273 196v235H0z'/%3E%3Cpath fill='%233f744d' fill-opacity='.50' d='M0 702c52-71 90-59 138-13 42-97 105-102 159-18 57-104 129-95 177 1 48-80 116-93 177 0 54-98 136-96 183 0 51-82 118-87 171 2 54-105 136-94 184 6 51-89 128-83 173 7 43-73 101-69 138 4v209H0z'/%3E%3Cg fill='%231d5935' fill-opacity='.45'%3E%3Cpath d='M90 900V663h13v237zM58 706l40-105 41 105-40-19z'/%3E%3Cpath d='M1430 900V618h15v282zM1387 672l51-132 53 132-53-24z'/%3E%3Cpath d='M1265 900V712h11v188zM1238 750l33-87 35 87-35-16z'/%3E%3Cpath d='M284 900V746h10v154zM258 777l31-77 32 77-32-14z'/%3E%3C/g%3E%3C/svg%3E"),
         radial-gradient(circle at 14% 10%, rgba(67,160,71,.16), transparent 32rem),
         radial-gradient(circle at 88% 82%, rgba(23,107,58,.16), transparent 34rem),
-        var(--jungle-original-background, #f4f1e8);
+        linear-gradient(180deg, #e9f1dc 0%, #bfd4b1 55%, #779b72 100%);
+      background-size: cover, cover, auto, auto, cover;
+      background-position: center, center bottom, left top, right bottom, center;
+      background-repeat: no-repeat;
+      background-attachment: fixed;
+    }
+
+    body.jungle-enveloped::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      pointer-events: none;
+      background:
+        radial-gradient(ellipse at 50% 30%, rgba(255,255,225,.34), transparent 35%),
+        linear-gradient(90deg, rgba(8,45,34,.13), transparent 16% 84%, rgba(8,45,34,.13));
     }
 
     .jungle-frame, .jungle-canopy, .jungle-floor, .jungle-vine,

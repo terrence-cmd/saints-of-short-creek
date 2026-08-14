@@ -91,7 +91,15 @@ const upload = multer({
   limits: { fileSize: 100 * 1024 * 1024, files: 30 }
 });
 
-app.use(express.static(path.join(__dirname, 'public')));
+// jungle-theme.js gets iterated on frequently during design review -- never let
+// browsers cache it, so redeploys show up without a manual hard refresh.
+app.use(express.static(path.join(__dirname, 'public'), {
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('jungle-theme.js')) {
+      res.setHeader('Cache-Control', 'no-store');
+    }
+  }
+}));
 
 app.post('/convert', upload.array('files', 30), async (req, res) => {
   const files = req.files || [];
