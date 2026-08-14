@@ -307,3 +307,54 @@ included it before this policy was applied consistently -- that historical
 commit still contains those resource IDs (git history isn't rewritten
 lightly), but no credentials or AWS account ID were ever committed at any
 point in this repo's history.
+
+## Per-photo format time: instrumenting before guessing
+
+With upload speed already reasonably optimized (see "Parallel uploads"
+above), attention turned to the other half of the per-photo cost: the
+actual RAW decode + resize/encode work. The ~3-second figure quoted earlier
+in this log turned out to be a bare command-line measurement, not something
+the running app had ever actually measured about itself -- the app also
+buffers the decoded image in memory, re-parses it for resizing, and zips the
+result, none of which had ever been timed separately. Before tuning
+anything, per-file decode and encode timing (plus a batch-level total) got
+added directly to the server so a future run can show the real split instead
+of assuming which stage is slow.
+
+## Rethinking how to test CPU count vs. RAM
+
+The original plan for sizing tests was to compare a few different cloud
+instance sizes directly. That turned out to be the wrong instrument: cloud
+instance families bundle CPU count and RAM together in ways that make it
+hard to change one without the other, and comparing across families that
+decouple them also changes CPU generation, muddying any result. The better
+approach settled on was to provision one instance large enough to cover the
+full range being tested, then use OS-level resource controls (cgroups) to
+independently dial CPU count and memory ceiling up and down within that one
+box -- a real isolated, then combined, test of both variables, with one
+important trap noted for next time: throttling CPU time isn't the same as
+restricting visible core count, and only the latter actually tests what
+"fewer processors" is supposed to mean.
+
+Along the way, a real latent bug got spotted (not yet fixed): the server
+sizes its internal decode concurrency off the host's total core count at
+startup, which would silently misbehave under a deliberately core-restricted
+test environment -- it's the kind of thing that's easy to miss until you
+actually try to constrain a box's visible CPUs and watch the app ignore the
+constraint.
+
+## Deciding to isolate testing into its own AWS account
+
+While sketching an "only run the server when someone's actually using it"
+idea for cost and security reasons, it became clear that the shared AWS
+permissions setup this project's test instance currently borrows is also
+used by unrelated infrastructure elsewhere. Widening those permissions for
+this project's needs would have meant touching that unrelated
+infrastructure's access too. Rather than being careful about scoping every
+future permission change by hand, the decision was made to do upcoming
+sizing/load testing in a completely separate AWS account instead -- a hard
+boundary rather than a discipline to maintain. That also makes any future
+testing's cost trivial to see on its own, and shrinks how much stays
+network-reachable at any given time. Not yet executed -- the next session's
+first job is standing that account up before any further server-sizing
+testing happens.
