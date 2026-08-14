@@ -1,5 +1,5 @@
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
   --bg: #eef7e3;
   --bg-blob-1: #d5f2c2;
   --bg-blob-2: #fff3c4;
@@ -14,25 +14,6 @@
   --cta-text: #2b1400;
   --error: #e11d48;
   --done: #16a34a;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0c2016;
-    --bg-blob-1: #123a24;
-    --bg-blob-2: #2a2a12;
-    --card: #123421;
-    --text: #eaf7e0;
-    --muted: #9dc19f;
-    --border: #235c37;
-    --accent: #34d399;
-    --accent-hover: #6ee7b7;
-    --cta-a: #fb923c;
-    --cta-b: #fde047;
-    --cta-text: #2b1400;
-    --error: #fb7185;
-    --done: #4ade80;
-  }
 }
 
 * { box-sizing: border-box; }
