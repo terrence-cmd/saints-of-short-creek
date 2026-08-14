@@ -39,6 +39,11 @@ if (-not (Test-Path $SampleFile)) {
     exit 1
 }
 
+# Windows PowerShell 5.1 doesn't load System.IO.Compression.ZipFile by default --
+# without this, every OpenRead() below fails with "Unable to find type", which
+# looks exactly like a corrupt/incomplete zip if you're not looking closely.
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 $csvPath = Join-Path $OutDir "results.csv"
 "N,StartUtc,EndUtc,HttpCode,TimeTotal,TimeStartTransfer,SizeUpload,SizeDownload,ExitCode,ZipValid,EntryCount,HasErrorsFile,Classification" |
@@ -54,32 +59,49 @@ function Invoke-Step {
 
     $stepZip = Join-Path $OutDir "step-$N.zip"
     $wPath = Join-Path $OutDir "step-$N.wout"
+    $errPath = Join-Path $OutDir "step-$N.curl-stderr.log"
     $timeline = Join-Path $OutDir "step-$N.timeline.csv"
 
     $fileArgs = @()
     for ($i = 0; $i -lt $N; $i++) { $fileArgs += @("-F", "files=@$SampleFile") }
 
     $writeOut = "$N,%{time_total},%{time_starttransfer},%{size_upload},%{size_download},%{http_code}"
+    # "format" is placed before the file parts on purpose -- the server now
+    # streams the upload and starts decoding+encoding each file as soon as it
+    # arrives, so it needs format known before the first file, not after.
     $curlArgs = @(
         "-K", $curlCfgPath,
         "--max-time", "400",
+        "-s", "-S",
         "-w", $writeOut,
-        "-o", $stepZip
+        "-o", $stepZip,
+        "-F", "format=jpeg"
     ) + $fileArgs + @(
-        "-F", "format=jpeg",
         "http://$($env:RAWCONV_HOST)/convert"
     )
 
     $startUtc = (Get-Date).ToUniversalTime().ToString("o")
     "TimestampUtc,Bytes" | Out-File -Encoding utf8 $timeline
 
-    $proc = Start-Process -FilePath "curl.exe" -ArgumentList $curlArgs -NoNewWindow -PassThru -RedirectStandardOutput $wPath
+    $proc = Start-Process -FilePath "curl.exe" -ArgumentList $curlArgs -NoNewWindow -PassThru -RedirectStandardOutput $wPath -RedirectStandardError $errPath
+    # Touching .Handle right after Start-Process forces the Process object to
+    # cache a real handle to the child -- without this, Start-Process -PassThru
+    # is known to leave .ExitCode unreadable (silently blank, no exception)
+    # once the process exits. Redirecting BOTH stdout and stderr (not just
+    # stdout) is also required for Start-Process to report ExitCode reliably.
+    $proc.Handle | Out-Null
 
     while (-not $proc.HasExited) {
         $sz = if (Test-Path $stepZip) { (Get-Item $stepZip).Length } else { 0 }
         "$((Get-Date).ToUniversalTime().ToString('o')),$sz" | Out-File -Append -Encoding utf8 $timeline
         Start-Sleep -Milliseconds 1000
     }
+    # HasExited can flip true slightly before curl.exe has actually released its
+    # handle on $stepZip / finished flushing redirected stdout -- WaitForExit()
+    # blocks until that cleanup is really done. Without this, $proc.ExitCode came
+    # back blank and ZipFile.OpenRead() below hit a false "corrupt" read on a zip
+    # that curl had, in fact, finished writing correctly.
+    $proc.WaitForExit()
     $exitCode = $proc.ExitCode
     $endUtc = (Get-Date).ToUniversalTime().ToString("o")
 
@@ -90,15 +112,26 @@ function Invoke-Step {
     $zipValid = $false
     $entryCount = 0
     $hasErrorsFile = $false
+    $zipOpenError = $null
     if (Test-Path $stepZip) {
-        try {
-            $zip = [System.IO.Compression.ZipFile]::OpenRead($stepZip)
-            $entryCount = $zip.Entries.Count
-            $hasErrorsFile = ($zip.Entries.Name -contains "_errors.txt")
-            $zipValid = $true
-            $zip.Dispose()
-        } catch {
-            $zipValid = $false
+        # Small retry margin against transient file-lock hiccups (e.g. AV
+        # scanning a freshly-written .zip) before concluding it's corrupt.
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+            try {
+                $zip = [System.IO.Compression.ZipFile]::OpenRead($stepZip)
+                $entryCount = $zip.Entries.Count
+                $hasErrorsFile = ($zip.Entries.Name -contains "_errors.txt")
+                $zipValid = $true
+                $zip.Dispose()
+                break
+            } catch {
+                $zipValid = $false
+                $zipOpenError = $_.Exception.Message
+                if ($attempt -lt 3) { Start-Sleep -Milliseconds 300 }
+            }
+        }
+        if (-not $zipValid) {
+            Write-Host "  (zip open failed after retries: $zipOpenError)"
         }
     }
 

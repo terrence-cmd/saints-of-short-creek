@@ -2,3 +2,4 @@ node_modules/
 *.log
 .env
 SESSION_HANDOFF.md
+loadtest/runs/

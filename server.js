@@ -7,11 +7,12 @@
 // SESSION_HANDOFF.md for the build steps (not an npm package).
 import express from 'express';
 import morgan from 'morgan';
-import multer from 'multer';
+import Busboy from 'busboy';
 import sharp from 'sharp';
 import archiver from 'archiver';
 import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -81,15 +82,29 @@ app.use((req, res, next) => {
   res.status(401).send('Authentication required');
 });
 
-const upload = multer({
-  storage: multer.diskStorage({
-    destination: os.tmpdir(),
-    filename: (req, file, cb) => {
-      cb(null, `rawconv-${Date.now()}-${Math.random().toString(36).slice(2)}-${sanitizeFilename(file.originalname)}`);
-    }
-  }),
-  limits: { fileSize: 100 * 1024 * 1024, files: 30 }
-});
+const MAX_FILES = 30;
+const MAX_FILE_SIZE = 100 * 1024 * 1024;
+
+// Decode is CPU-bound (a dcraw_emu child process); capping concurrency at
+// the instance's core count lets files decode while later files are still
+// uploading, without oversubscribing the CPU once several are in flight.
+const DECODE_CONCURRENCY = os.cpus().length;
+let activeDecodes = 0;
+const decodeQueue = [];
+function withDecodeSlot(fn) {
+  return new Promise((resolve, reject) => {
+    const run = () => {
+      activeDecodes++;
+      fn().then(resolve, reject).finally(() => {
+        activeDecodes--;
+        const next = decodeQueue.shift();
+        if (next) next();
+      });
+    };
+    if (activeDecodes < DECODE_CONCURRENCY) run();
+    else decodeQueue.push(run);
+  });
+}
 
 // All static assets are being iterated on frequently during design review --
 // never let browsers cache any of them, so redeploys show up without a manual
@@ -100,57 +115,143 @@ app.use(express.static(path.join(__dirname, 'public'), {
   }
 }));
 
-app.post('/convert', upload.array('files', 30), async (req, res) => {
-  const files = req.files || [];
-  if (!files.length) {
-    res.status(400).json({ error: 'No files uploaded' });
+// Streams the upload instead of buffering the whole request first (as the
+// old multer-based version did). The browser client and the load-test
+// driver both send format/quality/resize fields BEFORE the file parts, so
+// by the time the first file arrives those values are already final --
+// each file's decode+encode can start the moment IT finishes uploading,
+// overlapping with the upload of whatever comes after it, rather than
+// waiting for the entire batch to arrive before processing anything.
+// (A client that sent files before fields would just get default
+// format/quality for those files, not a crash -- same graceful-default
+// behavior the old req.body parsing already had.)
+app.post('/convert', (req, res) => {
+  let bb;
+  try {
+    bb = Busboy({ headers: req.headers, limits: { files: MAX_FILES, fileSize: MAX_FILE_SIZE } });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
     return;
   }
 
-  const format = FORMATS.has(req.body.format) ? req.body.format : 'jpeg';
-  const quality = Math.min(100, Math.max(1, parseInt(req.body.quality, 10) || 85));
-  const resizeWidth = parseInt(req.body.resizeWidth, 10) || null;
-  const resizeHeight = parseInt(req.body.resizeHeight, 10) || null;
-
-  res.setHeader('Content-Type', 'application/zip');
-  res.setHeader('Content-Disposition', 'attachment; filename="converted.zip"');
-
-  const archive = archiver('zip', { zlib: { level: 9 } });
-  archive.on('error', (err) => {
-    console.error('Archive error:', err);
-    res.destroy(err);
-  });
-  archive.pipe(res);
+  let format = 'jpeg';
+  let quality = 85;
+  let resizeWidth = null;
+  let resizeHeight = null;
 
   const errors = [];
   const usedNames = new Set();
+  const pending = [];
+  let fileCount = 0;
+  let aborted = false;
+  let archive = null;
 
-  for (const file of files) {
-    const baseName = path.parse(sanitizeFilename(file.originalname)).name;
+  function ensureArchiveStarted() {
+    if (archive) return;
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', 'attachment; filename="converted.zip"');
+    archive = archiver('zip', { zlib: { level: 9 } });
+    archive.on('error', (err) => {
+      console.error('Archive error:', err);
+      aborted = true;
+      res.destroy(err);
+    });
+    archive.pipe(res);
+  }
+
+  async function processFile(tempPath, baseName) {
     try {
-      const outputBuffer = await convertRaw(file.path, { format, quality, resizeWidth, resizeHeight });
+      const tiffBuffer = await withDecodeSlot(() => decodeRawToTiff(tempPath));
 
+      let pipeline = sharp(tiffBuffer);
+      if (resizeWidth || resizeHeight) {
+        pipeline = pipeline.resize(resizeWidth || null, resizeHeight || null, {
+          fit: 'inside',
+          withoutEnlargement: true
+        });
+      }
+      if (format === 'jpeg') pipeline = pipeline.jpeg({ quality });
+      else if (format === 'webp') pipeline = pipeline.webp({ quality });
+      else pipeline = pipeline.png();
+      const outputBuffer = await pipeline.toBuffer();
+
+      if (aborted) return;
+      ensureArchiveStarted();
       let entryName = `${baseName}.${EXT_FOR_FORMAT[format]}`;
       let dupeCount = 1;
       while (usedNames.has(entryName)) {
         entryName = `${baseName}-${++dupeCount}.${EXT_FOR_FORMAT[format]}`;
       }
       usedNames.add(entryName);
-
       archive.append(outputBuffer, { name: entryName });
     } catch (err) {
-      console.error(`Failed to convert ${file.originalname}:`, err.message);
-      errors.push(`${file.originalname}: ${err.message}`);
+      console.error(`Failed to convert ${baseName}:`, err.message);
+      errors.push(`${baseName}: ${err.message}`);
     } finally {
-      fs.unlink(file.path).catch(() => {});
+      fs.unlink(tempPath).catch(() => {});
     }
   }
 
-  if (errors.length) {
-    archive.append(errors.join('\n') + '\n', { name: '_errors.txt' });
-  }
+  bb.on('field', (name, value) => {
+    if (name === 'format' && FORMATS.has(value)) format = value;
+    else if (name === 'quality') quality = Math.min(100, Math.max(1, parseInt(value, 10) || 85));
+    else if (name === 'resizeWidth') resizeWidth = parseInt(value, 10) || null;
+    else if (name === 'resizeHeight') resizeHeight = parseInt(value, 10) || null;
+  });
 
-  await archive.finalize();
+  bb.on('file', (name, stream, info) => {
+    if (name !== 'files') {
+      stream.resume();
+      return;
+    }
+    fileCount++;
+    const originalname = info.filename || 'file';
+    const baseName = path.parse(sanitizeFilename(originalname)).name;
+    const tempPath = path.join(
+      os.tmpdir(),
+      `rawconv-${Date.now()}-${Math.random().toString(36).slice(2)}-${sanitizeFilename(originalname)}`
+    );
+
+    let truncated = false;
+    stream.on('limit', () => { truncated = true; });
+
+    const writeStream = fsSync.createWriteStream(tempPath);
+    stream.pipe(writeStream);
+
+    pending.push(new Promise((resolve) => {
+      writeStream.on('finish', () => resolve());
+      writeStream.on('error', (err) => {
+        errors.push(`${originalname}: ${err.message}`);
+        fs.unlink(tempPath).catch(() => {});
+        resolve();
+      });
+    }).then(async () => {
+      if (truncated) {
+        errors.push(`${originalname}: exceeds ${MAX_FILE_SIZE} byte limit`);
+        fs.unlink(tempPath).catch(() => {});
+        return;
+      }
+      await processFile(tempPath, baseName);
+    }));
+  });
+
+  bb.on('close', async () => {
+    await Promise.all(pending);
+
+    if (!fileCount) {
+      res.status(400).json({ error: 'No files uploaded' });
+      return;
+    }
+    if (aborted) return;
+
+    ensureArchiveStarted();
+    if (errors.length) {
+      archive.append(errors.join('\n') + '\n', { name: '_errors.txt' });
+    }
+    await archive.finalize();
+  });
+
+  req.pipe(bb);
 });
 
 function decodeRawToTiff(inputPath) {
@@ -172,25 +273,6 @@ function decodeRawToTiff(inputPath) {
       }
     );
   });
-}
-
-async function convertRaw(inputPath, { format, quality, resizeWidth, resizeHeight }) {
-  const tiffBuffer = await decodeRawToTiff(inputPath);
-
-  let pipeline = sharp(tiffBuffer);
-
-  if (resizeWidth || resizeHeight) {
-    pipeline = pipeline.resize(resizeWidth || null, resizeHeight || null, {
-      fit: 'inside',
-      withoutEnlargement: true
-    });
-  }
-
-  if (format === 'jpeg') pipeline = pipeline.jpeg({ quality });
-  else if (format === 'webp') pipeline = pipeline.webp({ quality });
-  else pipeline = pipeline.png();
-
-  return await pipeline.toBuffer();
 }
 
 app.listen(PORT, () => {

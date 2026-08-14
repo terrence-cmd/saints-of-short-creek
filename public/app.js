@@ -84,8 +84,11 @@ convertForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   if (!selectedFiles.length) return;
 
+  // Fields are appended before files on purpose: the server streams this
+  // upload and starts decoding+encoding each file as soon as it arrives, so
+  // it needs format/quality/resize already in hand before the first file
+  // shows up rather than waiting for the whole request to finish.
   const formData = new FormData();
-  for (const file of selectedFiles) formData.append('files', file);
   formData.append('format', formatSelect.value);
   formData.append('quality', qualityInput.value);
 
@@ -93,6 +96,8 @@ convertForm.addEventListener('submit', async (e) => {
   const resizeHeight = document.getElementById('resizeHeight').value;
   if (resizeWidth) formData.append('resizeWidth', resizeWidth);
   if (resizeHeight) formData.append('resizeHeight', resizeHeight);
+
+  for (const file of selectedFiles) formData.append('files', file);
 
   convertBtn.disabled = true;
   statusEl.className = 'status';
