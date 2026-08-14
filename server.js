@@ -13,6 +13,7 @@ import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -22,11 +23,51 @@ const PORT = process.env.PORT || 3000;
 const FORMATS = new Set(['jpeg', 'webp', 'png']);
 const EXT_FOR_FORMAT = { jpeg: 'jpg', webp: 'webp', png: 'png' };
 
+// Strips any directory components and non-safe characters from a
+// user-supplied filename. Without this, a crafted originalname (e.g.
+// containing "../") could escape the intended temp/zip-entry path --
+// both multer's diskStorage filename and the zip entry name below are
+// built from this value.
+function sanitizeFilename(name) {
+  return path.basename(name).replace(/[^a-zA-Z0-9_.-]/g, '_') || 'file';
+}
+
+// Public-facing deployments must set these; refuse to run wide open.
+const AUTH_USER = process.env.APP_USER;
+const AUTH_PASS = process.env.APP_PASS;
+if (!AUTH_USER || !AUTH_PASS) {
+  console.error('APP_USER and APP_PASS env vars must be set -- refusing to start without auth.');
+  process.exit(1);
+}
+
+function timingSafeStringEqual(a, b) {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
+app.use((req, res, next) => {
+  const [scheme, encoded] = (req.headers.authorization || '').split(' ');
+  if (scheme === 'Basic' && encoded) {
+    const decoded = Buffer.from(encoded, 'base64').toString('utf8');
+    const sep = decoded.indexOf(':');
+    const user = decoded.slice(0, sep);
+    const pass = decoded.slice(sep + 1);
+    if (timingSafeStringEqual(user, AUTH_USER) && timingSafeStringEqual(pass, AUTH_PASS)) {
+      next();
+      return;
+    }
+  }
+  res.set('WWW-Authenticate', 'Basic realm="SaintsOfShortCreek"');
+  res.status(401).send('Authentication required');
+});
+
 const upload = multer({
   storage: multer.diskStorage({
     destination: os.tmpdir(),
     filename: (req, file, cb) => {
-      cb(null, `rawconv-${Date.now()}-${Math.random().toString(36).slice(2)}-${file.originalname}`);
+      cb(null, `rawconv-${Date.now()}-${Math.random().toString(36).slice(2)}-${sanitizeFilename(file.originalname)}`);
     }
   }),
   limits: { fileSize: 100 * 1024 * 1024, files: 30 }
@@ -60,7 +101,7 @@ app.post('/convert', upload.array('files', 30), async (req, res) => {
   const usedNames = new Set();
 
   for (const file of files) {
-    const baseName = path.parse(file.originalname).name;
+    const baseName = path.parse(sanitizeFilename(file.originalname)).name;
     try {
       const outputBuffer = await convertRaw(file.path, { format, quality, resizeWidth, resizeHeight });
 
