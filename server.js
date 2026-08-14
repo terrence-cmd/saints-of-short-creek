@@ -6,6 +6,7 @@
 // even on a t3.small. It must be built from source and on PATH -- see
 // SESSION_HANDOFF.md for the build steps (not an npm package).
 import express from 'express';
+import morgan from 'morgan';
 import multer from 'multer';
 import sharp from 'sharp';
 import archiver from 'archiver';
@@ -19,6 +20,12 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Requests arrive via the cloudflared tunnel (a local reverse proxy), so
+// req.ip would otherwise show 127.0.0.1 for every visitor -- trust the
+// X-Forwarded-For it sets so logging below reflects the real client IP.
+app.set('trust proxy', true);
+app.use(morgan('combined'));
 
 const FORMATS = new Set(['jpeg', 'webp', 'png']);
 const EXT_FOR_FORMAT = { jpeg: 'jpg', webp: 'webp', png: 'png' };
@@ -62,9 +69,13 @@ app.use((req, res, next) => {
     const pass = decoded.slice(sep + 1);
     const expectedPass = AUTH_USERS.get(user);
     if (expectedPass !== undefined && timingSafeStringEqual(pass, expectedPass)) {
+      console.log(`[auth] success user=${user} ip=${req.ip}`);
       next();
       return;
     }
+    console.log(`[auth] failure user=${user || '(empty)'} ip=${req.ip}`);
+  } else {
+    console.log(`[auth] no credentials offered ip=${req.ip}`);
   }
   res.set('WWW-Authenticate', 'Basic realm="SaintsOfShortCreek"');
   res.status(401).send('Authentication required');
