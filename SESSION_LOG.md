@@ -74,6 +74,31 @@ wasm, no polyfill, no silent-hang failure mode.
   from environment variables and refuses to start if they're unset, so it
   can't accidentally end up running wide open.
 
+## Going public, and adding a second user
+
+After confirming the full `/convert` route worked end-to-end (not just the
+`dcraw_emu` CLI in isolation), the app was opened up beyond the private SSM
+tunnel: inbound access on its port was allowed from anywhere, and it's now
+reachable over plain HTTP at the test instance's public address, gated by
+HTTP Basic Auth. Terrence shared that URL with a friend to test with.
+
+A second user (Christine) needed her own login rather than sharing
+Terrence's. That meant extending the auth from a single hardcoded
+username/password pair to a small multi-user scheme: one `APP_CREDENTIALS`
+environment variable holding a comma-separated `user:pass` list, parsed into
+a lookup map at startup. Same fail-closed behavior as before -- the server
+still refuses to start if that variable isn't set.
+
+Neither user's actual password is written down anywhere in this repo --
+they were generated and handed over out of band, same as the AWS resource
+IDs and hostname below.
+
+**Known limitation, not yet addressed:** this is plain HTTP, not HTTPS, so
+Basic Auth credentials cross the network in the clear. Acceptable for a
+short-lived test with people you trust; would need real TLS (e.g. a
+Cloudflare proxy, or a proper cert) before this becomes anything longer-lived
+or more widely shared.
+
 ## Why SESSION_HANDOFF.md isn't in this repo
 
 This repo is public (intentionally, so it can be pulled from another AWS
