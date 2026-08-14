@@ -91,13 +91,12 @@ const upload = multer({
   limits: { fileSize: 100 * 1024 * 1024, files: 30 }
 });
 
-// jungle-theme.js gets iterated on frequently during design review -- never let
-// browsers cache it, so redeploys show up without a manual hard refresh.
+// All static assets are being iterated on frequently during design review --
+// never let browsers cache any of them, so redeploys show up without a manual
+// hard refresh. TODO: revisit once the design pass is finished.
 app.use(express.static(path.join(__dirname, 'public'), {
-  setHeaders: (res, filePath) => {
-    if (filePath.endsWith('jungle-theme.js')) {
-      res.setHeader('Cache-Control', 'no-store');
-    }
+  setHeaders: (res) => {
+    res.setHeader('Cache-Control', 'no-store');
   }
 }));
 
