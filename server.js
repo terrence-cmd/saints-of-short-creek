@@ -148,6 +148,22 @@ app.post('/convert', (req, res) => {
   let aborted = false;
   let archive = null;
 
+  // Diagnostic timing only (see SESSION_HANDOFF.md "flatten the per-photo
+  // format time" investigation) -- decodeMs/encodeMs are the real per-file
+  // cost; sumDecodeMs/sumEncodeMs vs wallMs on 'finish' isolates everything
+  // else (upload overlap, zip compression, request overhead) as one bucket.
+  const requestStart = performance.now();
+  let totalDecodeMs = 0;
+  let totalEncodeMs = 0;
+  res.on('finish', () => {
+    const wallMs = performance.now() - requestStart;
+    console.log(
+      `[timing] batch files=${fileCount} wallMs=${wallMs.toFixed(0)} ` +
+      `sumDecodeMs=${totalDecodeMs.toFixed(0)} sumEncodeMs=${totalEncodeMs.toFixed(0)} ` +
+      `otherMs=${(wallMs - totalDecodeMs - totalEncodeMs).toFixed(0)}`
+    );
+  });
+
   // If the client disconnects mid-upload (observed in practice: a dropped
   // home connection killing the request partway through a batch), whichever
   // file was still being written never fires its writeStream 'finish' event,
@@ -183,8 +199,10 @@ app.post('/convert', (req, res) => {
   }
 
   async function processFile(tempPath, baseName) {
+    const fileStart = performance.now();
     try {
       const tiffBuffer = await withDecodeSlot(() => decodeRawToTiff(tempPath));
+      const decodeEnd = performance.now();
 
       let pipeline = sharp(tiffBuffer);
       if (resizeWidth || resizeHeight) {
@@ -197,6 +215,16 @@ app.post('/convert', (req, res) => {
       else if (format === 'webp') pipeline = pipeline.webp({ quality });
       else pipeline = pipeline.png();
       const outputBuffer = await pipeline.toBuffer();
+      const encodeEnd = performance.now();
+
+      const decodeMs = decodeEnd - fileStart;
+      const encodeMs = encodeEnd - decodeEnd;
+      totalDecodeMs += decodeMs;
+      totalEncodeMs += encodeMs;
+      console.log(
+        `[timing] file=${baseName} decodeMs=${decodeMs.toFixed(0)} encodeMs=${encodeMs.toFixed(0)} ` +
+        `tiffBytes=${tiffBuffer.length} outBytes=${outputBuffer.length}`
+      );
 
       if (aborted) return;
       ensureArchiveStarted();
