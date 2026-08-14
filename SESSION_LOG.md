@@ -99,6 +99,46 @@ short-lived test with people you trust; would need real TLS (e.g. a
 Cloudflare proxy, or a proper cert) before this becomes anything longer-lived
 or more widely shared.
 
+## UI refresh: jungle theme and rebrand
+
+The reviewer this app is being built for is a bubbly documentarian, so the UI
+got a deliberate personality pass: a bright, lively jungle-themed palette
+(leafy greens, warm orange/yellow accents), a playful display font for the
+headline, and a rebrand from the generic "RAW Photo Converter" title to "The
+Saints of Short Creek RAW Photo Converter". Pure `public/index.html` +
+`public/style.css` change, no server or JS changes. Originally shipped with
+separate light and dark palettes (switching via `prefers-color-scheme`), but
+simplified to a single forced-light palette so the branding renders
+consistently for every viewer regardless of their device's theme setting.
+
+## Stable public URL: custom domain + named Cloudflare Tunnel
+
+The account-less Cloudflare "quick tunnel" used earlier has a real limitation:
+no uptime guarantee, and the URL changes any time the tunnel process restarts
+-- not viable to hand out as a permanent link. Replaced it with a real domain
+on a named Cloudflare Tunnel, which gives a stable HTTPS URL that survives
+restarts.
+
+Along the way, a genuine deployment mistake surfaced and got fixed: while
+generating the tunnel's connector install command from the Cloudflare
+dashboard, the OS selector defaulted to Windows, and the connector install
+command was run on a local Windows machine before the correct Linux command
+for the actual server was ready. That put a second, non-functional connector
+on the same tunnel -- one with nothing behind it on the expected port.
+Cloudflare Tunnel spreads incoming traffic across every connector attached to
+a tunnel, so once the correct connector (on the real server) also came
+online, roughly half of all requests landed on the dead one and failed with a
+502 error. Diagnosed by noticing the failures weren't intermittent load
+issues but a clean ~50% split, checking the tunnel's connector list in the
+dashboard, and confirming two connectors were attached where only one should
+have been. Fixed by removing the stray connector; verified with several
+consecutive successful requests afterward.
+
+**Lesson for next time:** always double check which machine/OS a generated
+install or setup command is about to run on before running it, especially
+when a dashboard or wizard defaults to a guess (like "Windows") that may not
+match the actual target server.
+
 ## Why SESSION_HANDOFF.md isn't in this repo
 
 This repo is public (intentionally, so it can be pulled from another AWS
