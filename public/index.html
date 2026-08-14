@@ -3,15 +3,19 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>RAW Photo Converter</title>
+<title>The Saints of Short Creek RAW Photo Converter</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
 <div class="wrap">
-  <h1>RAW Photo Converter</h1>
+  <h1><span class="leaf" aria-hidden="true">🌿</span> The Saints of Short Creek <span class="h1-sub">RAW Photo Converter</span></h1>
   <p class="sub">Batch-convert CR2 / CR3 / NEF / ARW / DNG / RAF and more to JPEG, WebP, or PNG.</p>
 
   <div id="dropzone" class="dropzone">
+    <p class="dropzone-icon" aria-hidden="true">🐆 🌴 📸</p>
     <p>Drag &amp; drop RAW files here, or click to choose files</p>
     <input id="fileInput" type="file" multiple accept=".cr2,.cr3,.nef,.arw,.dng,.raf,.orf,.rw2,.pef,.srw,.3fr,.erf,.kdc,.mrw,.nrw,.raw" hidden />
   </div>
@@ -44,7 +48,7 @@
       </div>
     </div>
 
-    <button id="convertBtn" type="submit" disabled>Convert &amp; Download Zip</button>
+    <button id="convertBtn" type="submit" disabled>🍃 Convert &amp; Download Zip</button>
   </form>
 
   <div id="status" class="status" aria-live="polite"></div>
