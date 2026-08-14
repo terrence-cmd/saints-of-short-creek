@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>RAW Photo Converter</title>
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+<div class="wrap">
+  <h1>RAW Photo Converter</h1>
+  <p class="sub">Batch-convert CR2 / CR3 / NEF / ARW / DNG / RAF and more to JPEG, WebP, or PNG.</p>
+
+  <div id="dropzone" class="dropzone">
+    <p>Drag &amp; drop RAW files here, or click to choose files</p>
+    <input id="fileInput" type="file" multiple accept=".cr2,.cr3,.nef,.arw,.dng,.raf,.orf,.rw2,.pef,.srw,.3fr,.erf,.kdc,.mrw,.nrw,.raw" hidden />
+  </div>
+
+  <ul id="fileList" class="file-list"></ul>
+
+  <form id="convertForm" class="controls">
+    <div class="field">
+      <label for="format">Output format</label>
+      <select id="format" name="format">
+        <option value="jpeg" selected>JPEG</option>
+        <option value="webp">WebP</option>
+        <option value="png">PNG</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label for="quality">Quality <span id="qualityValue">85</span></label>
+      <input id="quality" name="quality" type="range" min="1" max="100" value="85" />
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label for="resizeWidth">Max width (px)</label>
+        <input id="resizeWidth" name="resizeWidth" type="number" min="1" placeholder="original" />
+      </div>
+      <div class="field">
+        <label for="resizeHeight">Max height (px)</label>
+        <input id="resizeHeight" name="resizeHeight" type="number" min="1" placeholder="original" />
+      </div>
+    </div>
+
+    <button id="convertBtn" type="submit" disabled>Convert &amp; Download Zip</button>
+  </form>
+
+  <div id="status" class="status" aria-live="polite"></div>
+</div>
+<script src="/app.js"></script>
+</body>
+</html>

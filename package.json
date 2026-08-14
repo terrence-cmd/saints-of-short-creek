@@ -1,0 +1,18 @@
+{
+  "name": "saints-of-short-creek",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Browser-based batch RAW (CR2/NEF/ARW/DNG/etc) to JPEG/WebP/PNG converter",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "archiver": "^7.0.1",
+    "express": "^4.21.0",
+    "libraw-wasm": "^1.6.0",
+    "multer": "^1.4.5-lts.1",
+    "sharp": "^0.33.5",
+    "web-worker": "^1.3.0"
+  }
+}
