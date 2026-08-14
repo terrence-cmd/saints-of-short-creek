@@ -1,0 +1,88 @@
+# Session Log — 2026-08-14
+
+Narrative record of how this project got built, for anyone (including future
+us) picking it back up. Infra specifics (instance IDs, VPC/subnet/security
+group IDs, credentials, hostnames) live in `SESSION_HANDOFF.md`, which is
+intentionally **not** committed to this public repo -- see the note at the
+bottom of this file for why.
+
+## What got built
+
+A browser-based batch RAW photo converter: drag-drop CR2/CR3/NEF/ARW/DNG/RAF
+files, pick an output format (JPEG/WebP/PNG), optional resize + quality
+controls, get a zip of converted files back. Node/Express backend, plain
+HTML/CSS/JS frontend, no build step.
+
+## The libraw-wasm dead end (worth documenting for anyone else hitting this)
+
+The original plan was the `libraw-wasm` npm package for RAW decoding, since it
+avoids needing a native build toolchain. It looked reasonable on paper: pure
+WASM, published API, README claims Node.js support.
+
+In practice, decode calls **hung forever** under plain Node (Express, no
+timeout, no error) instead of ever resolving or rejecting. Root cause, found
+via an isolated repro script outside Express/multer entirely:
+
+- `libraw-wasm`'s worker script uses browser `Worker` globals
+  (`self.onmessage`/`postMessage`), so it needs the `web-worker` npm package
+  as a polyfill to run inside Node's `worker_threads` at all.
+- Once running, its Emscripten-compiled loader tries to fetch its `.wasm`
+  binary via `fetch()`, which fails on `file://` URLs in Node, then falls
+  back to `XMLHttpRequest`, which doesn't exist in Node at all. The worker
+  aborts almost immediately.
+- Critically, `libraw-wasm`'s `LibRaw` class never wires up an error/exit
+  handler on the underlying worker. When the worker dies, every in-flight
+  call's promise just sits unresolved forever -- no error, no timeout, no
+  signal that anything went wrong.
+- This is very easy to misdiagnose as "the instance is too weak / decode is
+  just slow" -- a stuck request looks identical to a slow one from the
+  outside. The tell was CloudWatch: CPU utilization stayed under 9% the
+  entire time a "decode" sat running for 15+ minutes, with CPU credits
+  climbing rather than draining. Real compute work would show load; a dead
+  worker waiting on an unsettled promise won't.
+- Their own CI only validates decoding in headless Chromium, not plain
+  Node -- so this isn't really a "Node-supported" package in practice despite
+  what the README says.
+
+## What replaced it
+
+Native LibRaw, built from source (`dnf groupinstall "Development Tools"` +
+standard autotools build), specifically its `dcraw_emu` sample CLI tool.
+`server.js` shells out to it (`dcraw_emu -T -w -q 3 -o 1 -Z - <input>`,
+TIFF to stdout) and pipes the result straight into `sharp`, which reads TIFF
+natively -- no manual width/height/channel-count bookkeeping needed like the
+raw-buffer approach would have required.
+
+Result: a 26MP RAW file decodes in about 3 seconds, even on the smallest
+practical EC2 instance size, using multiple cores via OpenMP. No Worker, no
+wasm, no polyfill, no silent-hang failure mode.
+
+## Other fixes made along the way
+
+- **sharp CVE:** `npm audit` flagged a high-severity libvips vulnerability in
+  sharp <0.35.0. Bumped to `sharp@^0.35.3`, which needs Node >=20.9 --
+  documented via `engines` in `package.json`. The original test instance
+  shipped with Node 18 (also past EOL) and was upgraded to Node 22.
+- **Upload filename sanitization:** the multer disk-storage filename and the
+  zip entry name were both built from the uploaded file's original name
+  without sanitizing it first -- a crafted filename containing `../` could
+  have escaped the intended temp-file or zip-entry path. Fixed by routing
+  both through a `path.basename` + charset-allowlist helper before this app
+  was ever exposed outside a private tunnel.
+- **Auth:** the app originally had none. Before opening any public network
+  access to it, added a minimal HTTP Basic Auth gate that reads credentials
+  from environment variables and refuses to start if they're unset, so it
+  can't accidentally end up running wide open.
+
+## Why SESSION_HANDOFF.md isn't in this repo
+
+This repo is public (intentionally, so it can be pulled from another AWS
+account for testing). `SESSION_HANDOFF.md` has real AWS resource identifiers
+for the instance this was developed and tested on. Those alone don't grant
+access to anything without real AWS credentials, but they're still
+infrastructure fingerprinting information not worth publishing by default,
+so that file stays local-only and gitignored. One early commit briefly
+included it before this policy was applied consistently -- that historical
+commit still contains those resource IDs (git history isn't rewritten
+lightly), but no credentials or AWS account ID were ever committed at any
+point in this repo's history.
