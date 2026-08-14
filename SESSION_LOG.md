@@ -139,6 +139,56 @@ install or setup command is about to run on before running it, especially
 when a dashboard or wizard defaults to a guess (like "Windows") that may not
 match the actual target server.
 
+## Incremental load-test harness (2026-08-14, later same day)
+
+With the reviewer flow settled, attention turned to a question nobody had
+tested yet: how many RAW files can one `/convert` request actually handle
+before something gives out, and what actually gives out first (memory, CPU,
+disk, network, or just Node's own request timeout)? The app processes files
+serially within a request with zero concurrency cap between separate
+requests, and had no built-in instrumentation at all -- no memory logging, no
+per-file timing -- so answering "where does it fail" meant building
+observability from outside the app rather than adding it inside.
+
+Two scripts were added under `loadtest/`:
+
+- **`ramp-driver.ps1`** -- a PowerShell script that ramps batch size (files
+  attached to a single `/convert` request) up a coarse sequence, watches for
+  the first full-batch failure (a real crash/timeout, not the app's normal
+  per-file error handling, which still returns a valid partial zip), then
+  bisects to find the exact failing batch size. Classifies each step from the
+  server's own response -- HTTP status, curl exit code, and whether the
+  returned zip actually opens with the right number of entries -- rather than
+  guessing from timing alone.
+- **`observer.sh`** -- a small poll loop meant to run on the server itself
+  during a ramp, logging one line a second: network throughput (interface
+  byte counters only, not per-connection or content-level data), RAM,
+  temp-storage usage, count of any leftover upload files, and whether the
+  server process is still listening at all. Reusing a network-heartbeat
+  approach worked out earlier in a separate discussion about watching for
+  bandwidth surges at the infrastructure level, generalized here to also
+  catch the more likely culprits (RAM headroom on a small instance, and
+  whether temp storage is itself memory-backed).
+
+Worth remembering for next time: this app's temp upload storage lives on a
+memory-backed filesystem on the test instance, not a separate disk -- so "ran
+out of disk" and "ran out of RAM" are not actually independent failure modes
+here, they're the same resource. Also worth remembering: Node's default
+request timeout (5 minutes) covers the entire time spent receiving the
+upload, and with a single ~30MB test file taking on the order of tens of
+seconds to upload from a home connection, a big-enough batch will likely hit
+that timeout during upload, long before any server-side resource ceiling is
+reached -- a client-uplink artifact that's easy to mistake for a real
+capacity limit if the two aren't told apart. The driver script accounts for
+this by running an identical control pass from the server itself (bypassing
+the home uplink) rather than trusting a single external run.
+
+As of this write-up the harness is built and the observer has been started
+on the live instance, but the actual ramp has not run yet -- it needs a
+one-time local permission adjustment first (see `SESSION_HANDOFF.md` for
+where things stand). Next session should pick up from there rather than
+re-deriving any of the above.
+
 ## Why SESSION_HANDOFF.md isn't in this repo
 
 This repo is public (intentionally, so it can be pulled from another AWS
