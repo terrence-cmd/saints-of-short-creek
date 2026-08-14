@@ -142,9 +142,32 @@ app.post('/convert', (req, res) => {
   const errors = [];
   const usedNames = new Set();
   const pending = [];
+  const tempFiles = [];
+  const openWriteStreams = new Set();
   let fileCount = 0;
   let aborted = false;
   let archive = null;
+
+  // If the client disconnects mid-upload (observed in practice: a dropped
+  // home connection killing the request partway through a batch), whichever
+  // file was still being written never fires its writeStream 'finish' event,
+  // so the per-file cleanup below never runs and the temp file leaks forever.
+  // Since /tmp here is tmpfs (shares RAM with the app itself), that leak
+  // silently eats the instance's memory across repeated aborted requests --
+  // this is a real, observed failure mode, not a hypothetical one. Destroy
+  // any still-open write streams and unlink every temp file this request
+  // created, regardless of how far each one got.
+  function cleanupOnAbort() {
+    aborted = true;
+    for (const ws of openWriteStreams) ws.destroy();
+    for (const p of tempFiles) fs.unlink(p).catch(() => {});
+  }
+  req.on('aborted', cleanupOnAbort);
+  bb.on('error', (err) => {
+    console.error('Upload parse error:', err.message);
+    cleanupOnAbort();
+    if (!res.headersSent) res.status(400).json({ error: err.message });
+  });
 
   function ensureArchiveStarted() {
     if (archive) return;
@@ -212,20 +235,31 @@ app.post('/convert', (req, res) => {
       `rawconv-${Date.now()}-${Math.random().toString(36).slice(2)}-${sanitizeFilename(originalname)}`
     );
 
+    tempFiles.push(tempPath);
+
     let truncated = false;
     stream.on('limit', () => { truncated = true; });
 
     const writeStream = fsSync.createWriteStream(tempPath);
+    openWriteStreams.add(writeStream);
     stream.pipe(writeStream);
 
     pending.push(new Promise((resolve) => {
-      writeStream.on('finish', () => resolve());
+      // 'close' is the catch-all: it fires after 'finish', after 'error', and
+      // after an explicit destroy() with no error -- listening for it too
+      // (on top of 'finish'/'error') guarantees this promise always settles,
+      // even when cleanupOnAbort() destroys the stream directly. A promise
+      // only ever resolves once, so 'finish' then 'close' both firing is safe.
+      writeStream.on('finish', () => { openWriteStreams.delete(writeStream); resolve(); });
       writeStream.on('error', (err) => {
+        openWriteStreams.delete(writeStream);
         errors.push(`${originalname}: ${err.message}`);
         fs.unlink(tempPath).catch(() => {});
         resolve();
       });
+      writeStream.on('close', () => { openWriteStreams.delete(writeStream); resolve(); });
     }).then(async () => {
+      if (aborted) return; // cleanupOnAbort() already unlinked tempPath -- nothing to decode
       if (truncated) {
         errors.push(`${originalname}: exceeds ${MAX_FILE_SIZE} byte limit`);
         fs.unlink(tempPath).catch(() => {});
@@ -237,12 +271,12 @@ app.post('/convert', (req, res) => {
 
   bb.on('close', async () => {
     await Promise.all(pending);
+    if (aborted) return; // response already handled (or impossible to send) via cleanupOnAbort's caller
 
     if (!fileCount) {
       res.status(400).json({ error: 'No files uploaded' });
       return;
     }
-    if (aborted) return;
 
     ensureArchiveStarted();
     if (errors.length) {
