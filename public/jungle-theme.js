@@ -1,0 +1,236 @@
+/**
+ * Saints of Short Creek — Jungle UI treatment
+ * Add this file to the site and load it with:
+ *   <script src="/jungle-theme.js" defer></script>
+ *
+ * The decoration is isolated from the application: it is aria-hidden,
+ * pointer-events:none, and uses a very high stacking layer only at the edges.
+ */
+(function () {
+  "use strict";
+
+  if (window.__shortCreekJungleLoaded) return;
+  window.__shortCreekJungleLoaded = true;
+
+  const style = document.createElement("style");
+  style.id = "short-creek-jungle-styles";
+  style.textContent = `
+    :root {
+      --jungle-deep: #082d22;
+      --jungle-leaf: #176b3a;
+      --jungle-bright: #43a047;
+      --jungle-lime: #8bc34a;
+      --jungle-gold: #f4c95d;
+      --jungle-shadow: rgba(3, 24, 17, .48);
+    }
+
+    body.jungle-enveloped {
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 14% 10%, rgba(67,160,71,.16), transparent 32rem),
+        radial-gradient(circle at 88% 82%, rgba(23,107,58,.16), transparent 34rem),
+        var(--jungle-original-background, #f4f1e8);
+    }
+
+    .jungle-frame, .jungle-canopy, .jungle-floor, .jungle-vine,
+    .jungle-creature, .jungle-light {
+      position: fixed;
+      pointer-events: none !important;
+      user-select: none;
+      z-index: 2147483000;
+    }
+
+    .jungle-canopy {
+      inset: 0 0 auto 0;
+      height: clamp(50px, 9vw, 112px);
+      filter: drop-shadow(0 10px 12px var(--jungle-shadow));
+      background:
+        radial-gradient(ellipse at 4% 0%, #0d4a2b 0 42%, transparent 44%),
+        radial-gradient(ellipse at 14% 0%, #247a3e 0 38%, transparent 40%),
+        radial-gradient(ellipse at 27% -10%, #145d32 0 45%, transparent 47%),
+        radial-gradient(ellipse at 42% -18%, #338647 0 42%, transparent 44%),
+        radial-gradient(ellipse at 58% -18%, #155a32 0 43%, transparent 45%),
+        radial-gradient(ellipse at 74% -8%, #2a7c41 0 43%, transparent 45%),
+        radial-gradient(ellipse at 88% 0%, #12532f 0 40%, transparent 42%),
+        radial-gradient(ellipse at 100% 0%, #2b8243 0 43%, transparent 45%);
+      transform-origin: top center;
+      animation: jungle-breathe 7s ease-in-out infinite;
+    }
+
+    .jungle-frame {
+      top: 0;
+      bottom: 0;
+      width: clamp(28px, 5vw, 72px);
+      opacity: .96;
+      filter: drop-shadow(0 0 14px var(--jungle-shadow));
+    }
+    .jungle-frame.left { left: 0; }
+    .jungle-frame.right { right: 0; transform: scaleX(-1); }
+
+    .jungle-leaf {
+      position: absolute;
+      left: -16%;
+      width: 120%;
+      aspect-ratio: 1 / 1.7;
+      border-radius: 100% 0 100% 0;
+      transform: rotate(var(--r, 42deg));
+      transform-origin: 0 100%;
+      background: linear-gradient(135deg, var(--c, #2e8b45), #0e4a2d 78%);
+      box-shadow: inset -7px -5px 13px rgba(0,0,0,.2);
+      animation: jungle-sway var(--d, 6s) ease-in-out infinite alternate;
+    }
+    .jungle-leaf::after {
+      content: "";
+      position: absolute;
+      inset: 48% 8% auto 8%;
+      height: 2px;
+      background: rgba(220,255,205,.32);
+      transform: rotate(-43deg);
+      transform-origin: center;
+    }
+
+    .jungle-vine {
+      top: -15px;
+      width: 5px;
+      height: clamp(120px, 23vh, 270px);
+      border-radius: 50%;
+      background: linear-gradient(90deg, #174b29, #4d8b46, #123d25);
+      box-shadow: 2px 0 5px rgba(0,0,0,.28);
+      transform-origin: top;
+      animation: jungle-vine-sway 8s ease-in-out infinite alternate;
+    }
+    .jungle-vine::after {
+      content: "";
+      position: absolute;
+      bottom: -18px;
+      left: -8px;
+      width: 22px;
+      height: 30px;
+      border-radius: 100% 0 100% 0;
+      background: #388e4b;
+      transform: rotate(22deg);
+    }
+    .jungle-vine.v1 { left: 8%; }
+    .jungle-vine.v2 { right: 12%; height: clamp(85px, 17vh, 190px); animation-delay: -3s; }
+
+    .jungle-floor {
+      left: 0;
+      right: 0;
+      bottom: -18px;
+      height: clamp(42px, 8vw, 96px);
+      opacity: .92;
+      filter: drop-shadow(0 -7px 10px rgba(3,24,17,.25));
+      background:
+        radial-gradient(ellipse at 4% 100%, #1b6b39 0 42%, transparent 44%),
+        radial-gradient(ellipse at 16% 110%, #398b48 0 43%, transparent 45%),
+        radial-gradient(ellipse at 31% 110%, #155a32 0 43%, transparent 45%),
+        radial-gradient(ellipse at 49% 112%, #2b7b41 0 46%, transparent 48%),
+        radial-gradient(ellipse at 68% 110%, #155a32 0 44%, transparent 46%),
+        radial-gradient(ellipse at 84% 108%, #398b48 0 42%, transparent 44%),
+        radial-gradient(ellipse at 98% 100%, #1b6b39 0 43%, transparent 45%);
+    }
+
+    .jungle-creature {
+      font-family: "Apple Color Emoji", "Segoe UI Emoji", sans-serif;
+      line-height: 1;
+      filter: drop-shadow(0 5px 5px rgba(0,0,0,.28));
+      transform-origin: center bottom;
+    }
+    .jungle-creature.parrot {
+      top: clamp(44px, 7vw, 84px);
+      right: clamp(24px, 5vw, 72px);
+      font-size: clamp(30px, 4vw, 55px);
+      animation: jungle-perch 5s ease-in-out infinite;
+    }
+    .jungle-creature.monkey {
+      bottom: clamp(26px, 5vw, 65px);
+      left: clamp(25px, 5vw, 78px);
+      font-size: clamp(32px, 4.5vw, 62px);
+      animation: jungle-peek 7s ease-in-out infinite;
+    }
+    .jungle-creature.butterfly {
+      top: 28%;
+      left: 7%;
+      font-size: clamp(18px, 2.2vw, 29px);
+      animation: jungle-flutter 11s ease-in-out infinite;
+    }
+
+    .jungle-light {
+      inset: 0;
+      z-index: 2147482999;
+      background:
+        linear-gradient(112deg, transparent 0 16%, rgba(255,245,180,.07) 24%, transparent 34%),
+        linear-gradient(70deg, transparent 0 68%, rgba(255,245,180,.055) 76%, transparent 84%);
+      mix-blend-mode: screen;
+    }
+
+    @keyframes jungle-sway { to { transform: rotate(calc(var(--r, 42deg) + 8deg)) scale(1.035); } }
+    @keyframes jungle-vine-sway { from { transform: rotate(-2deg); } to { transform: rotate(3deg); } }
+    @keyframes jungle-breathe { 50% { transform: scaleY(1.035); } }
+    @keyframes jungle-perch { 0%,100% { transform: rotate(-3deg); } 50% { transform: translateY(4px) rotate(4deg); } }
+    @keyframes jungle-peek { 0%,18%,100% { transform: translateY(24%); } 35%,72% { transform: translateY(0) rotate(-3deg); } }
+    @keyframes jungle-flutter {
+      0%,100% { transform: translate(0,0) rotate(-8deg); }
+      32% { transform: translate(55px,-34px) rotate(12deg); }
+      68% { transform: translate(25px,45px) rotate(-12deg); }
+    }
+
+    @media (max-width: 720px) {
+      .jungle-frame { width: 31px; opacity: .82; }
+      .jungle-canopy { height: 52px; opacity: .9; }
+      .jungle-creature.butterfly, .jungle-light { display: none; }
+      .jungle-creature.parrot { right: 24px; }
+      .jungle-creature.monkey { left: 20px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .jungle-enveloped *, .jungle-enveloped *::before, .jungle-enveloped *::after {
+        animation-duration: .001ms !important;
+        animation-iteration-count: 1 !important;
+      }
+    }
+
+    @media print {
+      .jungle-frame, .jungle-canopy, .jungle-floor, .jungle-vine,
+      .jungle-creature, .jungle-light { display: none !important; }
+    }
+  `;
+
+  const layer = document.createElement("div");
+  layer.id = "short-creek-jungle";
+  layer.setAttribute("aria-hidden", "true");
+
+  const leaves = [
+    ["3%", "48deg", "#2e8b45", "6.2s"], ["15%", "28deg", "#176b3a", "7.3s"],
+    ["29%", "58deg", "#43a047", "5.7s"], ["43%", "34deg", "#1f773c", "8.1s"],
+    ["58%", "55deg", "#388e4b", "6.8s"], ["72%", "25deg", "#206f39", "7.7s"],
+    ["86%", "52deg", "#43a047", "5.9s"]
+  ].map(([top, rotation, color, duration]) =>
+    `<i class="jungle-leaf" style="top:${top};--r:${rotation};--c:${color};--d:${duration}"></i>`
+  ).join("");
+
+  layer.innerHTML = `
+    <div class="jungle-light"></div>
+    <div class="jungle-canopy"></div>
+    <div class="jungle-frame left">${leaves}</div>
+    <div class="jungle-frame right">${leaves}</div>
+    <div class="jungle-vine v1"></div>
+    <div class="jungle-vine v2"></div>
+    <div class="jungle-creature parrot">🦜</div>
+    <div class="jungle-creature monkey">🐒</div>
+    <div class="jungle-creature butterfly">🦋</div>
+    <div class="jungle-floor"></div>
+  `;
+
+  function mount() {
+    if (!document.head || !document.body) return requestAnimationFrame(mount);
+    const originalBackground = getComputedStyle(document.body).backgroundColor;
+    document.documentElement.style.setProperty("--jungle-original-background", originalBackground);
+    document.head.appendChild(style);
+    document.body.appendChild(layer);
+    document.body.classList.add("jungle-enveloped");
+  }
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", mount, { once: true });
+  else mount();
+})();
