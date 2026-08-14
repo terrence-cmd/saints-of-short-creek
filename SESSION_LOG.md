@@ -183,11 +183,117 @@ capacity limit if the two aren't told apart. The driver script accounts for
 this by running an identical control pass from the server itself (bypassing
 the home uplink) rather than trusting a single external run.
 
-As of this write-up the harness is built and the observer has been started
-on the live instance, but the actual ramp has not run yet -- it needs a
-one-time local permission adjustment first (see `SESSION_HANDOFF.md` for
-where things stand). Next session should pick up from there rather than
-re-deriving any of the above.
+As of this write-up the harness was built and the observer had been started
+on the live instance, but the actual ramp hadn't run yet -- it needed a
+one-time local permission adjustment first. That got resolved later the
+same session (see below), and the harness went on to do its job.
+
+## What the ramp actually found, and fixing the ramp itself first
+
+Once unblocked, the ramp's first real run immediately reported every
+request as a failure -- including a single-file request that should have
+trivially succeeded. Two genuine bugs in the load-test driver itself
+turned out to be masking any real signal from the server:
+
+- The driver's own recorded exit code for its upload tool came back blank
+  on every single run. Root cause: a well-known PowerShell quirk where a
+  background-process handle needs to be explicitly touched right after
+  starting it, and both its output streams need to be captured (not just
+  one), or the exit code silently never gets recorded afterward.
+- Every genuinely successful response was being flagged as corrupt. This
+  first looked like a timing race (the response file being checked before
+  the upload tool had fully released it), and was addressed as one before
+  the real cause turned up: Windows PowerShell doesn't load the .NET zip
+  library by default, so every validation check was throwing "type not
+  found" -- which, if you're not looking closely, produces exactly the
+  same symptom as a corrupt file. The fix was a single missing library
+  load, not a timing fix at all.
+
+Worth remembering: a retry loop can silently paper over a bug that isn't
+actually a timing issue. Surfacing the *actual* exception message before
+reaching for a retry/backoff fix caught this one.
+
+With the driver itself trustworthy, the real finding came quickly: a
+25-file batch failed reliably at almost exactly 5 minutes, while 20 files
+succeeded cleanly. Server health checks all came back clean (no crash, no
+memory pressure, no restart) -- ruling out a resource ceiling. Five
+minutes is the framework's own default limit on how long it will wait to
+receive a request body, and it had never been overridden. Not a capacity
+problem at all -- a default nobody had looked at.
+
+## Overlapping upload and processing
+
+The app was processing an entire batch strictly in two phases: wait for
+every file to finish uploading, *then* start converting any of them. That
+meant a large batch's total time was upload time plus processing time,
+stacked, even though the actual conversion work for one file is fast
+(seconds) compared to the several seconds it takes just to upload one over
+a home connection.
+
+Rewriting the upload handling to stream the request instead of buffering
+it first let each file's conversion begin the moment *that* file finished
+arriving, running concurrently with whatever file was uploading next. This
+needed the format/quality/resize options to be known before any file
+starts arriving (the streaming parser processes the request in the order
+it was sent), so the upload form was changed to send those options first.
+Net effect, confirmed by measurement, not just architecture: per-file cost
+dropped by roughly a quarter, holding steady across a range of batch
+sizes.
+
+**A real memory leak turned up as a side effect of this rewrite, and got
+fixed:** if a client's connection drops mid-upload, the file still being
+written previously never got cleaned up -- it just sat there permanently.
+Upload temp storage on the test instance happens to live on the same
+memory pool as the app itself, so repeated dropped connections were slowly
+and silently eating available memory across a testing session, to the
+point of leaving well under 10% of system memory free before it was
+caught. Fixed by explicitly tracking every file a request creates and
+cleaning all of them up the moment a connection drops, not just on normal
+completion -- verified afterward by deliberately dropping a connection
+mid-batch and confirming nothing was left behind.
+
+With the timeout default removed (deliberately disabled rather than just
+raised, since a legitimate batch's upload time scales with how many files
+are in it -- there's no single safe fixed number to replace it with) and
+the batch-size cap raised accordingly, a 50-file batch that would have
+hit the old 5-minute wall partway through now completes cleanly end to
+end.
+
+## Parallel uploads, and how far that idea actually goes
+
+A single upload connection turned out not to be using all of the
+available bandwidth on the test connection used for development -- direct
+measurement (two files uploaded at once vs. sequentially) showed roughly
+a 30% time savings from simply running two uploads at the same time
+instead of one after another. That got built into the browser UI: a
+batch now splits into two groups and uploads both concurrently as two
+independent requests, each producing its own downloaded zip. No
+server-side changes were needed for this -- each half is a completely
+self-contained request.
+
+The natural follow-up question -- would more than two parallel uploads
+help further, or would splitting traffic across genuinely separate
+server processes "trick" a home router into allocating more bandwidth --
+got tested directly rather than assumed. It doesn't. Four simultaneous
+uploads performed worse than two. Splitting traffic across two separate
+server processes performed about the same as splitting across two
+connections to one process. Combining both (two processes, two
+connections each) performed *worse* than a single connection alone. The
+practical, measured conclusion: two simultaneous connections is the real
+sweet spot for the connection this was tested on, and pushing further in
+that direction -- more streams, more destinations, or both -- doesn't
+help and can actively hurt. This isn't treated as a closed question,
+though -- there's an open interest in revisiting parallel-upload
+behavior again in the future with a different angle, so it's parked
+here rather than considered fully settled.
+
+Testing the two-separate-processes variant required briefly opening an
+additional network port on the test infrastructure for the duration of
+the test, fully reverted afterward. Worth stating plainly since this app
+is being built for someone else to use: nothing about this testing ever
+touched or reconfigured anything on an end user's own device, network, or
+router -- everything tested and changed was entirely on the
+infrastructure side.
 
 ## Why SESSION_HANDOFF.md isn't in this repo
 
