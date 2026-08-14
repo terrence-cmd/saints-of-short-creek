@@ -1,7 +1,9 @@
 <#
 Incremental capacity ramp against the raw-photo-converter /convert endpoint.
-Coarse ramp (1,2,3,4,5,8,10,15,20,25,30) then bisects on the first full-batch
-failure to find the exact failing N. Stops at N=30 (multer's own cap).
+Coarse ramp (1,2,3,4,5,8,10,15,20,25,30 by default, override via
+-CoarseSteps) then bisects on the first full-batch failure to find the
+exact failing N. Server's own cap is MAX_FILES in server.js (100 as of
+this writing).
 
 A "full failure" (stop condition) is a non-200, a curl exit code != 0, or a
 zip that fails to open/has a wrong entry count -- i.e. the whole request died.
@@ -71,7 +73,7 @@ function Invoke-Step {
     # arrives, so it needs format known before the first file, not after.
     $curlArgs = @(
         "-K", $curlCfgPath,
-        "--max-time", "400",
+        "--max-time", "1800",
         "-s", "-S",
         "-w", $writeOut,
         "-o", $stepZip,

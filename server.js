@@ -82,7 +82,7 @@ app.use((req, res, next) => {
   res.status(401).send('Authentication required');
 });
 
-const MAX_FILES = 30;
+const MAX_FILES = 100;
 const MAX_FILE_SIZE = 100 * 1024 * 1024;
 
 // Decode is CPU-bound (a dcraw_emu child process); capping concurrency at
@@ -309,6 +309,14 @@ function decodeRawToTiff(inputPath) {
   });
 }
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`RAW photo converter listening on port ${PORT}`);
 });
+// Node's default requestTimeout (300s, covers the whole time to receive the
+// request body) killed real batches with an HTTP 408 well before any actual
+// resource ceiling was reached -- confirmed via load testing (N=25 failed at
+// ~302s with plenty of free CPU/RAM). Disabled entirely rather than just
+// raised, since a large batch's legitimate upload time scales with N and
+// there's no single safe fixed number to pick instead. Low risk here: this
+// is a single-user, Basic-Auth-protected test app, not a public endpoint.
+server.requestTimeout = 0;
