@@ -33,7 +33,7 @@
     }
 
     .jungle-frame, .jungle-canopy, .jungle-floor, .jungle-vine,
-    .jungle-creature, .jungle-light {
+    .jungle-creature, .jungle-light, .jungle-animal-ribbon {
       position: fixed;
       pointer-events: none !important;
       user-select: none;
@@ -130,6 +130,64 @@
         radial-gradient(ellipse at 98% 100%, #1b6b39 0 43%, transparent 45%);
     }
 
+    .jungle-animal-ribbon {
+      left: 50%;
+      bottom: clamp(12px, 2vw, 28px);
+      width: min(880px, calc(100vw - 80px));
+      height: clamp(66px, 10vw, 122px);
+      transform: translateX(-50%);
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-around;
+      padding: 0 clamp(8px, 2vw, 24px);
+      box-sizing: border-box;
+      font-family: "Apple Color Emoji", "Segoe UI Emoji", sans-serif;
+      line-height: 1;
+      filter: drop-shadow(0 7px 5px rgba(0,0,0,.28));
+    }
+
+    .jungle-animal-ribbon::before {
+      content: "";
+      position: absolute;
+      z-index: -1;
+      left: 2%;
+      right: 2%;
+      bottom: 3px;
+      height: 34%;
+      border-radius: 50% 50% 18% 18%;
+      background: linear-gradient(180deg, #398b48, #155a32 72%);
+      box-shadow: 0 6px 0 #0d4528;
+    }
+
+    .jungle-ribbon-item {
+      display: inline-block;
+      position: relative;
+      transform-origin: center bottom;
+      font-size: clamp(30px, 5vw, 62px);
+      animation: jungle-animal-bob var(--speed, 6s) ease-in-out infinite;
+      animation-delay: var(--delay, 0s);
+    }
+    .jungle-ribbon-item.tree {
+      z-index: -1;
+      font-size: clamp(47px, 8vw, 96px);
+      margin-inline: clamp(-18px, -2vw, -5px);
+      filter: saturate(.9) brightness(.9);
+      animation-name: jungle-tree-sway;
+    }
+    .jungle-ribbon-item.giraffe { font-size: clamp(48px, 7vw, 88px); }
+    .jungle-ribbon-item.elephant { font-size: clamp(36px, 5.8vw, 72px); }
+    .jungle-ribbon-item.lion { font-size: clamp(34px, 5vw, 64px); }
+    .jungle-ribbon-item.zebra { font-size: clamp(32px, 4.8vw, 60px); }
+
+    @keyframes jungle-animal-bob {
+      0%, 100% { transform: translateY(0) rotate(-1deg); }
+      50% { transform: translateY(-3px) rotate(1deg); }
+    }
+    @keyframes jungle-tree-sway {
+      0%, 100% { transform: rotate(-1.5deg); }
+      50% { transform: rotate(1.5deg); }
+    }
+
     .jungle-creature {
       font-family: "Apple Color Emoji", "Segoe UI Emoji", sans-serif;
       line-height: 1;
@@ -181,6 +239,14 @@
       .jungle-creature.butterfly, .jungle-light { display: none; }
       .jungle-creature.parrot { right: 24px; }
       .jungle-creature.monkey { left: 20px; }
+      .jungle-animal-ribbon {
+        width: calc(100vw - 42px);
+        bottom: 10px;
+        height: 68px;
+        overflow: hidden;
+      }
+      .jungle-ribbon-item:nth-child(2),
+      .jungle-ribbon-item:nth-child(8) { display: none; }
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -192,7 +258,7 @@
 
     @media print {
       .jungle-frame, .jungle-canopy, .jungle-floor, .jungle-vine,
-      .jungle-creature, .jungle-light { display: none !important; }
+      .jungle-creature, .jungle-light, .jungle-animal-ribbon { display: none !important; }
     }
   `;
 
@@ -219,6 +285,18 @@
     <div class="jungle-creature parrot">🦜</div>
     <div class="jungle-creature monkey">🐒</div>
     <div class="jungle-creature butterfly">🦋</div>
+    <div class="jungle-animal-ribbon">
+      <span class="jungle-ribbon-item tree" style="--speed:8s">🌴</span>
+      <span class="jungle-ribbon-item zebra" style="--delay:-3s">🦓</span>
+      <span class="jungle-ribbon-item giraffe" style="--delay:-1s;--speed:7s">🦒</span>
+      <span class="jungle-ribbon-item tree" style="--delay:-4s;--speed:9s">🌳</span>
+      <span class="jungle-ribbon-item lion" style="--delay:-2s">🦁</span>
+      <span class="jungle-ribbon-item elephant" style="--delay:-5s;--speed:7.5s">🐘</span>
+      <span class="jungle-ribbon-item tree" style="--delay:-2s;--speed:8.5s">🌴</span>
+      <span class="jungle-ribbon-item zebra" style="--delay:-4s;--speed:6.5s">🦓</span>
+      <span class="jungle-ribbon-item giraffe" style="--delay:-3s;--speed:7.8s">🦒</span>
+      <span class="jungle-ribbon-item tree" style="--delay:-6s;--speed:9.5s">🌳</span>
+    </div>
     <div class="jungle-floor"></div>
   `;
 
